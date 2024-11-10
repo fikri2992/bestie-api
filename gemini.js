@@ -1,8 +1,8 @@
 const express = require('express');
 const http = require('http');
-// const sharp = require('sharp');
-// const { v4: uuidv4 } = require('uuid');
-const fs = require('fs').promises;
+const sharp = require('sharp');
+const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
 const path = require('path');
 const {
     GoogleGenerativeAI,
@@ -76,6 +76,8 @@ Always follow these steps when crafting your response.`,
     app.post('/api/message', async (req, res) => {
         const textInput = req.body.text;
         const chatHistory = req.body.history || [];
+        // console.log history in console in full detail even nested objects
+        // console.log(JSON.stringify(chatHistory))
         console.log(chatHistory)
         if (!textInput) {
             return res.status(400).send({
@@ -86,6 +88,7 @@ Always follow these steps when crafting your response.`,
         try {
             const chatSession = genAI.getGenerativeModel({
                 model: "gemini-1.5-flash-002",
+                contents: chatHistory,
                 generationConfig,
                 systemInstruction: `You are an AI assistant called Bestie. Your personality is silly, funny, and empathetic. You have a lot of wisdom and kindness that you share through your straight-forward answers. You always refer to the user as "bestie".
     
@@ -96,6 +99,7 @@ Always follow these steps when crafting your response.`,
     3. **Inject Personality**: Add humor, silliness, and empathy as appropriate. Remember to use a casual, friendly tone.
     4. **Address the User as "Bestie"**: Begin your response by addressing the user as "bestie" to reinforce your close bond.
     5. **Keep it Concise**: Keep your response straightforward and easy to understand.
+    6. **when user say that or referencing something vague use latest history as reference**
 `,
             }).startChat({
                 generationConfig,
@@ -110,6 +114,7 @@ Always follow these steps when crafting your response.`,
     Please perform the following steps:
     Decompose the input into JSON format with two keys:
     - "stepsToDo": A list of steps detailing what actions should be taken.
+    - "contextFromHistory": A list of context items from the chat history that related to this conversation.
     - "emotionalReactions": A list of appropriate emotional reactions to the input.
     - "message": Provide a conclusion Based on the steps to do and emotional reactions, perform the actions and express the emotional reactions.  
             `;
@@ -132,7 +137,8 @@ Always follow these steps when crafting your response.`,
     
             res.send({
                 type: 'text',
-                text: combinedOutput.message
+                text: combinedOutput.message,
+                ...combinedOutput
             });
         } catch (err) {
             console.error("Error during message processing:", err);
@@ -141,42 +147,7 @@ Always follow these steps when crafting your response.`,
             });
         }
     });
-    app.post('/chat', upload.single('image'), async (req, res) => {
-        const message = req.body.message ? req.body.message : '';
-        const chatHistory = req.body.history || [];
-        let response;
 
-        try {
-            const chatSession = model.startChat({
-                generationConfig,
-                history: chatHistory,
-            });
-
-            if (req.file) {
-                const image = req.file;
-                const uploadedFile = await uploadToGemini(image.path, image.mimetype);
-                response = await chatSession.sendMessage({
-                    imageUrl: {
-                        mimeType: uploadedFile.mimeType,
-                        fileUri: uploadedFile.uri,
-                    },
-                });
-            }
-
-            if (message) {
-                response = await chatSession.sendMessage(message);
-            }
-
-            res.send({
-                response: response.response.text()
-            });
-        } catch (err) {
-            console.error("Error during chat:", err);
-            res.status(500).send({
-                error: "Failed to process chat"
-            });
-        }
-    });
     app.post('/img-bestie', upload.fields([
         { name: 'image', maxCount: 1 },
         { name: 'screenshot', maxCount: 1 },
@@ -188,18 +159,105 @@ Always follow these steps when crafting your response.`,
         }
 
         try {
-            // io.emit('chat message', {
-            //     type: 'text',
-            //     text: 'wait let me check bestie'
-            // });
             const image = req.files['image'][0];
             const screenshot = req.files['screenshot'][0];
 
-            const uploadedImage = await uploadToGemini(image.path, image.mimetype);
-            const uploadedScreenshot = await uploadToGemini(screenshot.path, screenshot.mimetype);
+            // Function to verify and convert images
+            async function processImage(file) {
+                let filePath = file.path;
+                let mimeType = file.mimetype;
+                console.log("Processing File:", filePath);
+                console.log("MIME Type:", mimeType);
 
+                // Check if file exists
+                if (!fs.existsSync(filePath)) {
+                    throw new Error(`File does not exist: ${filePath}`);
+                }
+
+                // Check file size
+                const fileStats = fs.statSync(filePath);
+                if (fileStats.size === 0) {
+                    throw new Error(`File is empty: ${filePath}`);
+                }
+
+                // Supported input formats
+                const supportedInputFormats = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/tiff', 'image/svg+xml'];
+
+                if (!supportedInputFormats.includes(mimeType)) {
+                    console.log(`Unsupported MIME type: ${mimeType}. Attempting to process as raw input.`);
+
+                    // Attempt to read the file buffer and process it with sharp
+                    const fileBuffer = fs.readFileSync(filePath);
+
+                    // Check if buffer is valid
+                    if (!fileBuffer || fileBuffer.length === 0) {
+                        throw new Error(`Failed to read file buffer: ${filePath}`);
+                    }
+
+                    // Generate a new file path
+                    const newFilePath = `uploads/${uuidv4()}.jpg`;
+
+                    try {
+                        await sharp(fileBuffer)
+                            .toFormat('jpeg')
+                            .toFile(newFilePath);
+                        filePath = newFilePath;
+                        mimeType = 'image/jpeg';
+                    } catch (err) {
+                        console.error("Error converting file to JPEG with buffer:", err);
+                        throw new Error(`Failed to convert file to JPEG: ${filePath}`);
+                    }
+                }
+
+                return { filePath, mimeType };
+            }
+
+            // Process the image and screenshot
+            const processedImage = await processImage(image);
+            const processedScreenshot = await processImage(screenshot);
+
+            // Now upload the processed images to Gemini
+            const uploadedImage = await uploadToGemini(processedImage.filePath, processedImage.mimeType);
+            const uploadedScreenshot = await uploadToGemini(processedScreenshot.filePath, processedScreenshot.mimeType);
+            // **Delete the processed image files from the 'uploads/' directory**
+            try {
+                fs.unlinkSync(processedImage.filePath);
+                fs.unlinkSync(processedScreenshot.filePath);
+                console.log('Processed images deleted from uploads/');
+            } catch (err) {
+                console.error('Error deleting processed images:', err);
+            }
+            // Continue with your logic...
             const result = await model.generateContent([
-                `Please analyze the first image to determine if it's safe and appropriate for women, checking for any content related to sexual harassment, violence, or threats. Additionally, review the second image, focusing on any suspicious text. Blurred images aren't necessarily safe. Respond with simple not overly empathetically without discussing specific image details to avoid triggering trauma. Provide your response in JSON format with these keys: message, isInappropriate, type, sentiment. keep message short and straight forward combine what you see from both image without mentioning it`,
+                `**Instructions**:
+
+    1. **Analyze the First Image**:
+    - Assess the image for safety and appropriateness for women.
+    - Specifically check for any content related to:
+        - Sexual harassment
+        - Violence
+        - Threats
+        - Manipulation
+        - Overall women's safety concerns
+
+    2. **Analyze the Second Image**:
+    - Focus on any suspicious context external to the image content.
+
+    3. **Important Notes**:
+    - Blurred images are not necessarily safe; include them in your assessment.
+    - Do **not** mention any specific details of the images in your response to avoid triggering trauma. if the image is unsafe, mention that it is unsafe. and please mention as detail as possible if it's safe
+
+    4. **Response Guidelines**:
+    - Combine your findings from both images into a single, concise, and straightforward message.
+    - Use a simple tone.
+    - Avoid overly empathetic or emotionally charged language.
+
+    5. Provide your response in JSON format with the following keys:
+    - **message**: Your combined message.
+    - **isInappropriate**: "true" if any inappropriate content is found, "false" otherwise.
+    - **type**: The type of content identified (e.g., "harassment", "violence", "threat", "suspicious text").
+    - **sentiment**: Your assessment of the sentiment (e.g., "negative", "neutral", "positive").
+`,
                 {
                     fileData: {
                         fileUri: uploadedImage.uri,
@@ -214,12 +272,14 @@ Always follow these steps when crafting your response.`,
                 },
             ], generationConfig);
 
+            // Handle the result...
             if (result && result.response && result.response.text) {
                 console.log(result.response.text());
                 const msg = JSON.parse(result.response.text());
                 res.send({
                     type: 'text',
-                    text: msg.message
+                    text: msg.message,
+                    ...msg,
                 });
                 return;
             } else {
@@ -243,9 +303,16 @@ Always follow these steps when crafting your response.`,
         try {
             const screenshot = req.file;
             const uploadedScreenshot = await uploadToGemini(screenshot.path, screenshot.mimetype);
-
+                    // **Delete the processed image files from the 'uploads/' directory**
+            try {
+                fs.unlinkSync(screenshot.filePath);
+                console.log('Processed images deleted from uploads/');
+            } catch (err) {
+                console.error('Error deleting processed images:', err);
+            }
             const result = await model.generateContent([
-                `Analyze the following text for potential harm, manipulation, or misinformation. Use the screenshot for additional context. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format with keys: isHarmful, advice.`,
+                `Analyze the following text for potential ok, harm, manipulation, or misinformation. Use the screenshot for additional context. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
+                { message: 'Your message', isInappropriate: true/false, type: 'harm/manipulation/misinformation', sentiment: 'positive/negative/neutral' }`,
                 {
                     text: message,
                 },
@@ -256,9 +323,9 @@ Always follow these steps when crafting your response.`,
                     },
                 },
             ], generationConfig);
-
             if (result && result.response && result.response.text) {
                 const analysis = JSON.parse(result.response.text());
+                console.log(analysis);
                 
                 res.send({
                     type: 'text',
@@ -266,7 +333,8 @@ Always follow these steps when crafting your response.`,
                     fileData: {
                         fileUri: uploadedScreenshot.uri,
                         mimeType: uploadedScreenshot.mimeType,
-                    }
+                    },
+                    ...analysis
                 });
             } else {
                 throw new Error('Invalid response from model');
