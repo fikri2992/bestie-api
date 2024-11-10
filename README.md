@@ -43,7 +43,7 @@ Bestie API is an AI-powered assistant built with Node.js and Express that intera
 
   
 
--  **Node.js** (version 14 or higher)
+-  **Node.js** (version 20 or higher)
 
 -  **npm** (Node Package Manager)
 
