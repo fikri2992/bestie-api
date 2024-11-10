@@ -118,7 +118,7 @@ Process a text message and receive a response from Bestie.
 	```json
 	{
 	  "type": "text",
-	  "text": "Bestie's response",
+	  "message": "Bestie's response",
 	  "stepsToDo": [...],
 	  "contextFromHistory": [...],
 	  "emotionalReactions": [...],
@@ -144,7 +144,7 @@ Upload two images for analysis.
     ```json
     {
       "type": "text",
-      "text": "Analysis result",
+      "message": "Analysis result",
       "isInappropriate": true,
       "type": "Type of content identified",
       "sentiment": "negative",
@@ -170,7 +170,7 @@ Upload a screenshot and text for analysis.
     ```json
     {
       "type": "text",
-      "text": "Analysis result",
+      "message": "Analysis result",
       "isInappropriate": false,
       "type": "manipulation",
       "sentiment": "neutral",
