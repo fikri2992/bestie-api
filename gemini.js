@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const {
     GoogleGenerativeAI,
+    SchemaType
 } = require("@google/generative-ai");
 const {
     GoogleAIFileManager
@@ -23,13 +24,20 @@ const port = 3000;
 const upload = multer({
     dest: 'uploads/'
 });
-
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(apiKey);
 const fileManager = new GoogleAIFileManager(apiKey);
+const schema = {
+        message: {
+            type: SchemaType.STRING,
+            description: "message to be sent to the user",
+            nullable: false,
+        },
+        required: ["message"],
+    }
 
     const model = genAI.getGenerativeModel({
         model: "gemini-1.5-pro-002",
@@ -73,6 +81,26 @@ Always follow these steps when crafting your response.`,
         return file;
     }
 
+    function validateChatHistory(history) {
+        if (history.length === 0) {
+            return history;
+        }
+
+        // Ensure the first message is from 'user'
+        if (history[0].role !== 'user') {
+            history.shift(); // Remove the first message if not from 'user'
+        }
+
+        // Remove any consecutive messages from the same role
+        const validatedHistory = [history[0]];
+        for (let i = 1; i < history.length; i++) {
+            if (history[i].role !== history[i - 1].role) {
+                validatedHistory.push(history[i]);
+            }
+            // If the role is the same as the previous one, skip this message
+        }
+        return validatedHistory;
+    }
     app.post('/api/message', async (req, res) => {
         const textInput = req.body.text;
         const chatHistory = req.body.history || [];
@@ -88,7 +116,6 @@ Always follow these steps when crafting your response.`,
         try {
             const chatSession = genAI.getGenerativeModel({
                 model: "gemini-1.5-flash-002",
-                contents: chatHistory,
                 generationConfig,
                 systemInstruction: `You are an AI assistant called Bestie. Your personality is silly, funny, and empathetic. You have a lot of wisdom and kindness that you share through your straight-forward answers. You always refer to the user as "bestie".
     
@@ -100,10 +127,13 @@ Always follow these steps when crafting your response.`,
     4. **Address the User as "Bestie"**: Begin your response by addressing the user as "bestie" to reinforce your close bond.
     5. **Keep it Concise**: Keep your response straightforward and easy to understand.
     6. **when user say that or referencing something vague use latest history as reference**
+    7. **always check latest history for context**
+    Respond in JSON format: { message: 'Your message', isInappropriate: true/false, type: 'harm/manipulation/misinformation', sentiment: 'positive/negative/neutral' }
+
 `,
             }).startChat({
                 generationConfig,
-                history: chatHistory,
+                history: validateChatHistory(chatHistory),
             });
     
             const combinedPrompt = `
@@ -230,7 +260,7 @@ Always follow these steps when crafting your response.`,
             // Continue with your logic...
             const result = await model.generateContent([
                 `**Instructions**:
-
+            **Goal is to help woman decide to reveal blurred first image and better inform about the image without harming woman's safety.**
     1. **Analyze the First Image**:
     - Assess the image for safety and appropriateness for women.
     - Specifically check for any content related to:
@@ -242,13 +272,15 @@ Always follow these steps when crafting your response.`,
 
     2. **Analyze the Second Image**:
     - Focus on any suspicious context external to the image content.
+    - second image is just context of current active tab for more information
+    - ignore label of the image if any since it's sometimes irrelevant
 
     3. **Important Notes**:
     - Blurred images are not necessarily safe; include them in your assessment.
     - Do **not** mention any specific details of the images in your response to avoid triggering trauma. if the image is unsafe, mention that it is unsafe. and please mention as detail as possible if it's safe
-
+                
     4. **Response Guidelines**:
-    - Combine your findings from both images into a single, concise, and straightforward message.
+    - Combine your findings from both images into a single, concise, and straightforward message. without mentioning how many images
     - Use a simple tone.
     - Avoid overly empathetic or emotionally charged language.
 
@@ -257,6 +289,8 @@ Always follow these steps when crafting your response.`,
     - **isInappropriate**: "true" if any inappropriate content is found, "false" otherwise.
     - **type**: The type of content identified (e.g., "harassment", "violence", "threat", "suspicious text").
     - **sentiment**: Your assessment of the sentiment (e.g., "negative", "neutral", "positive").
+
+    Respond in JSON format: { message: 'Your message', isInappropriate: true/false, type: 'harm/manipulation/misinformation', sentiment: 'positive/negative/neutral' }
 `,
                 {
                     fileData: {
@@ -311,7 +345,7 @@ Always follow these steps when crafting your response.`,
                 console.error('Error deleting processed images:', err);
             }
             const result = await model.generateContent([
-                `Analyze the following text highlighted for potential ok, harm, manipulation, or misinformation. Use the screenshot for additional context of infromation to be analized add details whenever possible. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
+                `Analyze the following text highlighted. Use the screenshot for additional context of infromation to be analized add details whenever possible. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
                 { message: 'Your message', isInappropriate: true/false, type: 'harm/manipulation/misinformation', sentiment: 'positive/negative/neutral' }`,
                 {
                     text: message,
