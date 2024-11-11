@@ -311,7 +311,7 @@ Always follow these steps when crafting your response.`,
                 console.error('Error deleting processed images:', err);
             }
             const result = await model.generateContent([
-                `Analyze the following text for potential ok, harm, manipulation, or misinformation. Use the screenshot for additional context. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
+                `Analyze the following text highlighted for potential ok, harm, manipulation, or misinformation. Use the screenshot for additional context of infromation to be analized add details whenever possible. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
                 { message: 'Your message', isInappropriate: true/false, type: 'harm/manipulation/misinformation', sentiment: 'positive/negative/neutral' }`,
                 {
                     text: message,
