@@ -339,13 +339,13 @@ Always follow these steps when crafting your response.`,
             const uploadedScreenshot = await uploadToGemini(screenshot.path, screenshot.mimetype);
                     // **Delete the processed image files from the 'uploads/' directory**
             try {
-                fs.unlinkSync(screenshot.filePath);
+                fs.unlinkSync(screenshot.path);
                 console.log('Processed images deleted from uploads/');
             } catch (err) {
                 console.error('Error deleting processed images:', err);
             }
             const result = await model.generateContent([
-                `Analyze the following text highlighted. Use the screenshot for additional context of infromation to be analized add details whenever possible. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
+                `Analyze the following text highlighted. Use the screenshot for additional context for example to whom or who the perspective of the highligted text of infromation to be analized add details whenever possible. Provide advice on how to respond, whether to block, report to authorities, or ignore. Respond in JSON format: 
                 { message: 'Your message', isInappropriate: true/false, type: 'harm/manipulation/misinformation', sentiment: 'positive/negative/neutral' }`,
                 {
                     text: message,
@@ -376,7 +376,7 @@ Always follow these steps when crafting your response.`,
         } catch (err) {
             console.error("Error during text and screenshot analysis:", err);
             res.status(500).send({
-                error: "Failed to analyze text and screenshot"
+                text: "Failed to analyze text and screenshot"
             });
         }
     });
